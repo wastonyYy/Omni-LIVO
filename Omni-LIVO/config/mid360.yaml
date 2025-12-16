@@ -1,0 +1,126 @@
+common:
+  lid_topic: "/livox/lidar"
+  imu_topic: "/livox/imu"
+  img_en: 1
+  lidar_en: 1
+  ros_driver_bug_fix: false
+
+extrin_calib:
+  # lidar->IMU
+  extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
+  extrinsic_R: [1, 0, 0,
+                0, 1, 0,
+                0, 0, 1]
+
+  # 多相机外参统一放这里 数量必须对应 相机到雷达的变换
+  cameras:
+
+    - cam_id: 0
+      img_topic: "/cam_front"
+      Rcl: [ -0.720207,  -0.693753,   0.002868,
+             -0.012521,   0.008864,  -0.999882,
+             0.693646,  -0.720158,  -0.015070]
+      Pcl: [  0.090756,  -0.006529,  -0.084491]
+
+    - cam_id: 1
+      img_topic: "/cam_left"
+
+      Rcl: [  0.707555,  -0.706598,   0.009238,
+              -0.004619,  -0.017697,  -0.999833,
+              0.706643,   0.707394,  -0.015785]
+      Pcl: [  0.054002,  -0.007218,  -0.088251]
+
+    - cam_id: 2
+      img_topic: "/cam_right"
+      Rcl: [ -0.693995,   0.719643,   0.022003,
+             -0.032811,  -0.001084,  -0.999461,
+             -0.719232,  -0.694343,   0.024365]
+      Pcl: [ -0.005720,  -0.078270,  -0.030108]
+
+      # When using the handheld dataset, comment out the config related to cam_rare:
+    #- cam_id: 3
+     # img_topic: "/cam_rare"
+     # Rcl: [  0.726027,   0.687592,  -0.010122,
+     #         0.001577,  -0.016384,  -0.999865,
+     #         -0.687665,   0.725912,  -0.012979]
+      #Pcl: [  0.079652,   0.014322,  -0.068272]
+
+
+time_offset:
+  imu_time_offset: 0.0
+  img_time_offset: 0.0
+  exposure_time_init: 0.0
+
+preprocess:
+  point_filter_num: 1
+  filter_size_surf: 0.1
+  lidar_type: 1
+  scan_line: 4
+  blind: 0.5
+
+vio:
+  max_iterations: 5
+  outlier_threshold: 100
+  img_point_cov: 1000
+  patch_size: 8
+  patch_pyrimid_level: 4
+  normal_en: true
+  inverse_composition_en: false
+  exposure_estimate_en: true
+  inv_expo_cov: 0.1
+  enable_dynamic_covariance: true
+  min_points_per_camera: 20
+  ideal_points_per_camera: 50
+  max_cov_scale: 10000.0
+  min_cov_scale: 200.0
+  raycast_en: true
+
+
+imu:
+  imu_en: true
+  imu_int_frame: 30
+  acc_cov: 0.5
+  gyr_cov: 0.3
+  b_acc_cov: 0.0001
+  b_gyr_cov: 0.0001
+
+lio:
+  max_iterations: 5
+  dept_err: 0.02
+  beam_err: 0.05
+  min_eigen_value: 0.0025
+  voxel_size: 0.5
+  max_layer: 2
+  max_points_num: 50
+  layer_init_num: [5, 5, 5, 5, 5]
+
+
+
+
+local_map:
+  map_sliding_en: false
+  half_map_size: 100
+  sliding_thresh: 8
+
+uav:
+  imu_rate_odom: false
+  gravity_align_en: false
+
+publish:
+  dense_map_en: false
+  pub_effect_point_en: false
+  pub_plane_en: false
+  pub_scan_num: 1
+  blind_rgb_points: 0.0
+
+evo:
+  seq_name: "frame_pose"
+  pose_output_en: false
+
+pcd_save:
+  pcd_save_en: false
+  ply_save_en: false  #for loop closure point cloud recontruct , must open loopclosure
+  colmap_output_en: false
+  filter_size_pcd: 0.2
+  interval: -1
+
