@@ -201,7 +201,7 @@ rosbag play newer_college.bag
 ✅ **Hilti SLAM Challenge 2022** (15 sequences)
 ✅ **Hilti SLAM Challenge 2023** (5 sequences)
 ✅ **Newer College Dataset** (7 sequences)
-✅ **Custom Multi-Camera Dataset** with LIVOX MID360 + 4 cameras
+✅ **Custom Multi-Camera Dataset** with LIVOX MID360 + 3/4 cameras
 
 ## System Architecture
 
@@ -250,7 +250,7 @@ Tested on NVIDIA Jetson AGX Orin (12-core ARM CPU @ 2.2GHz, 64GB RAM):
 | Configuration | Avg. Time | Memory | Real-time (10Hz) |
 |---------------|-----------|---------|------------------|
 | 3 Cameras (Hilti) | 60.3ms | 2906 MB | ✅ Yes |
-| 4 Cameras (Custom) | 40.6ms | 2359 MB | ✅ Yes |
+| 3/4 Cameras (Custom) | 40.6ms | 2359 MB | ✅ Yes |
 
 *1.16-1.21× overhead compared to FAST-LIVO2 while maintaining real-time performance*
 
