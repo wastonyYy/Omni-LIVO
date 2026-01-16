@@ -18,7 +18,10 @@ struct Feature
     int id_;
     int cam_id_;             //!< Camera ID that this feature is associated with
     FeatureType type_;       //!< Type can be corner or edgelet.
-    cv::Mat img_;            //!< Image associated with the patch feature
+
+    // 【内存优化】图像数据由Frame通过智能指针管理，Feature只持有引用
+    cv::Mat img_;            //!< Image associated with the patch feature (shared reference)
+
     Vector2d px_;            //!< Coordinates in pixels on pyramid level 0.
     Vector3d f_;             //!< Unit-bearing vector of the patch feature.
     int level_;              //!< Image pyramid level where patch feature was extracted.

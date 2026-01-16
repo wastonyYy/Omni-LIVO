@@ -294,7 +294,9 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   }
   else
   {
-    tau = state_inout.inv_expo_time;
+    // 【多相机曝光】从第一个相机读取曝光参数（仅用于协方差传播）
+    tau = (!state_inout.inv_expo_time_per_cam.empty())
+        ? state_inout.inv_expo_time_per_cam[0] : 1.0;
     // ROS_ERROR("tau: %.6f !!!!!!", tau);
   }
   // state_inout.cov(6, 6) = 0.01;
@@ -326,7 +328,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
       // cout<<"acc_avr: "<<acc_avr.transpose()<<endl;
 
       // #ifdef DEBUG_PRINT
-      fout_imu << setw(10) << head->header.stamp.toSec() - first_lidar_time << " " << angvel_avr.transpose() << " " << acc_avr.transpose() << endl;
+      //fout_imu << setw(10) << head->header.stamp.toSec() - first_lidar_time << " " << angvel_avr.transpose() << " " << acc_avr.transpose() << endl;
       // #endif
 
       // imu_time = head->header.stamp.toSec() - first_lidar_time;
@@ -423,7 +425,8 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   state_inout.vel_end = vel_imu;
   state_inout.rot_end = R_imu;
   state_inout.pos_end = pos_imu;
-  state_inout.inv_expo_time = tau;
+  // 【多相机曝光】曝光参数不再通过IMU传播，由VIO独立更新
+  // state_inout.inv_expo_time = tau;  // 已废弃
 
   /*** calculated the pos and attitude prediction at the frame-end ***/
   // if (imu_end_time>prop_beg_time)
@@ -559,7 +562,7 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
       ROS_INFO("IMU Initials: ba covarience: %.8f %.8f %.8f; bg covarience: "
                "%.8f %.8f %.8f",
                cov_bias_acc[0], cov_bias_acc[1], cov_bias_acc[2], cov_bias_gyr[0], cov_bias_gyr[1], cov_bias_gyr[2]);
-      fout_imu.open(DEBUG_FILE_DIR("imu.txt"), ios::out);
+      //fout_imu.open(DEBUG_FILE_DIR("imu.txt"), ios::out);
     }
 
     return;

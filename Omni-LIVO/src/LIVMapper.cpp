@@ -1,3 +1,32 @@
+/**
+ * @file LIVMapper.cpp
+ * @brief LiDAR-Inertial-Visual Mapper implementation for Omni-LIVO
+ *
+ * @copyright Copyright (c) 2026 Hangzhou Institute for Advanced Study,
+ *            University of Chinese Academy of Sciences
+ *
+ * @par Project: Omni-LIVO
+ * Omni-LIVO: Robust RGB-Colored Multi-Camera Visual-Inertial-LiDAR Odometry
+ * via Photometric Migration and ESIKF Fusion
+ *
+ * This work is based on FAST-LIVO2:
+ * C. Zheng, W. Xu, Q. Guo, and F. Zhang, "FAST-LIVO2: Fast, direct LiDAR-inertial-visual
+ * odometry," IEEE Trans. Robot., vol. 40, pp. 1529-1546, 2024.
+ *
+ * @author Yinong Cao (cyn_688@163.com), Chenyang Zhang, Xin He*, Yuwei Chen, Chengyu Pu,
+ *         Bingtao Wang, Kaile Wu, Shouzheng Zhu, Fei Han, Shijie Liu, Chunlai Li, Jianyu Wang
+ * @author *Corresponding author: Xin He (xinhe@ucas.ac.cn)
+ *
+ * @par Repository
+ * https://github.com/elon876/Omni-LIVO
+ *
+ * @par Citation
+ * If you use this code in your research, please cite our paper:
+ * Y. Cao et al., "Omni-LIVO: Robust RGB-Colored Multi-Camera Visual-Inertial-LiDAR
+ * Odometry via Photometric Migration and ESIKF Fusion," IEEE Robotics and Automation
+ * Letters, 2026.
+ */
+
 #include "LIVMapper.h"
 
 LIVMapper::LIVMapper(ros::NodeHandle &nh)
@@ -31,14 +60,12 @@ LIVMapper::LIVMapper(ros::NodeHandle &nh)
     path.header.stamp = ros::Time::now();
     path.header.frame_id = "camera_init";
 
-    // 确保 num_of_cameras 是一个有效的正整数
     if (num_of_cameras <= 0) {
         ROS_ERROR("Invalid number of cameras: %d", num_of_cameras);
         return;
     }
-    // 使用 num_of_cameras 初始化 img_buffers 和 img_time_buffers
-    img_buffers.resize(num_of_cameras);         // 为每个相机分配一个deque
-    img_time_buffers.resize(num_of_cameras);    // 为每个相机分配一个deque
+    img_buffers.resize(num_of_cameras);
+    img_time_buffers.resize(num_of_cameras);
 }
 
 LIVMapper::~LIVMapper() {}
@@ -91,9 +118,18 @@ void LIVMapper::readParameters(ros::NodeHandle &nh) {
     nh.param<int>("publish/pub_scan_num", pub_scan_num, 1);
     nh.param<bool>("publish/pub_effect_point_en", pub_effect_point_en, false);
     nh.param<bool>("publish/dense_map_en", dense_map_en, false);
+
+    nh.param<bool>("vio/enable_cross_camera_tracking", enable_cross_camera_tracking, false);
+    nh.param<bool>("vio/enable_dynamic_covariance", vio_dynamic_cov_enabled_, false);
+    nh.param<int>("vio/dynamic_cov_warmup_frames", vio_dynamic_cov_warmup_frames, 200);
+    nh.param<double>("vio/warmup_cov_scale", vio_warmup_cov_scale, 500.0);
+    nh.param<double>("vio/min_cov_scale", vio_min_cov_scale, 10.0);
+    nh.param<double>("vio/max_cov_scale", vio_max_cov_scale, 2000.0);
+    nh.param<double>("vio/dynamic_cov_error_max", vio_dynamic_cov_error_max, 50.0);
+    nh.param<int>("vio/max_total_points", max_total_points, 300);
+
     p_pre->blind_sqr = p_pre->blind * p_pre->blind;
 
-    // 输出多相机外参
     XmlRpc::XmlRpcValue extrinCams;
     if (nh.getParam("extrin_calib/cameras", extrinCams)) {
         if (extrinCams.getType() == XmlRpc::XmlRpcValue::TypeArray) {
@@ -104,14 +140,12 @@ void LIVMapper::readParameters(ros::NodeHandle &nh) {
             ROS_INFO("Found %d camera(s) in extrin_calib/cameras.", num_of_cameras);
             for (int i = 0; i < extrinCams.size(); i++) {
                 if (extrinCams[i].getType() == XmlRpc::XmlRpcValue::TypeStruct) {
-                    // 读取每台相机的图像话题（如果有的话）
                     std::string cam_topic;
                     if (extrinCams[i].hasMember("img_topic")) {
                         cam_topic = static_cast<std::string>(extrinCams[i]["img_topic"]);
                     }
                     camera_img_topics.push_back(cam_topic);
 
-                    // 输出外参Rcl
                     std::vector<double> Rcl_vec;
                     if (extrinCams[i].hasMember("Rcl")) {
                         XmlRpc::XmlRpcValue Rcl_param = extrinCams[i]["Rcl"];
@@ -134,7 +168,6 @@ void LIVMapper::readParameters(ros::NodeHandle &nh) {
                              Rcl_vec[0], Rcl_vec[1], Rcl_vec[2], Rcl_vec[3], Rcl_vec[4], Rcl_vec[5],
                              Rcl_vec[6], Rcl_vec[7], Rcl_vec[8]);
 
-                    // 输出外参Pcl
                     std::vector<double> Pcl_vec;
                     if (extrinCams[i].hasMember("Pcl")) {
                         XmlRpc::XmlRpcValue Pcl_param = extrinCams[i]["Pcl"];
@@ -172,7 +205,6 @@ bool loadMultipleCameras(int cams_num, const std::string& ns, std::vector<vk::Ab
     {
         std::string cam_ns = ns + "/cam_" + std::to_string(i);
         vk::AbstractCamera* cam = nullptr;
-        // 调用 vikit 内部的 loadFromRosNs()，该函数读取 cam_ns 下的相机参数
         if (!vk::camera_loader::loadFromRosNs(cam_ns, cam))
         {
             ROS_ERROR("Failed to load camera at namespace: %s", cam_ns.c_str());
@@ -194,7 +226,6 @@ void LIVMapper::initializeComponents() {
     voxelmap_manager->extT_ << VEC_FROM_ARRAY(extrinT);
     voxelmap_manager->extR_ << MAT_FROM_ARRAY(extrinR);
 
-    // 所有相机内参加载到 vector<vk::AbstractCamera*> cams_ 中
     if (!loadMultipleCameras(num_of_cameras,"laserMapping", vio_manager->cams))
         throw std::runtime_error("Failed to load camera models from 'laserMapping' namespace.");
     else
@@ -216,6 +247,16 @@ void LIVMapper::initializeComponents() {
     vio_manager->patch_pyrimid_level = patch_pyrimid_level;
     vio_manager->exposure_estimate_en = exposure_estimate_en;
     vio_manager->colmap_output_en = colmap_output_en;
+
+    vio_manager->enable_cross_camera_tracking = enable_cross_camera_tracking;
+    vio_manager->enable_dynamic_covariance_ = vio_dynamic_cov_enabled_;
+    vio_manager->dynamic_cov_warmup_frames = vio_dynamic_cov_warmup_frames;
+    vio_manager->warmup_cov_scale = vio_warmup_cov_scale;
+    vio_manager->min_cov_scale = vio_min_cov_scale;
+    vio_manager->max_cov_scale = vio_max_cov_scale;
+    vio_manager->dynamic_cov_error_max = vio_dynamic_cov_error_max;
+    vio_manager->max_total_points = max_total_points;
+
     vio_manager->initializeVIO();
 
     p_imu->set_extrinsic(extT, extR);
@@ -265,20 +306,17 @@ void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_tr
 
     sub_imu = nh.subscribe(imu_topic, 200000, &LIVMapper::imu_cbk, this);
 
-    // 图像订阅：使用 lambda 表达式来传递 cam_id
     sub_img_list.clear();
     if (!camera_img_topics.empty()) {
         for (int i = 0; i < camera_img_topics.size(); i++) {
-            // 使用 lambda 表达式绑定 cam_id 和其他相关参数
             auto img_cb = [i, this](const sensor_msgs::ImageConstPtr& msg) {
-                img_cbk(msg, i);  // 调用img_cbk，传递 cam_id
+                img_cbk(msg, i);
             };
 
-            // 使用 std::bind 来包装 lambda 函数，这样它可以作为订阅回调
             ros::Subscriber sub = nh.subscribe<sensor_msgs::Image>(
-                    camera_img_topics[i],    // 订阅的图像话题
-                    200000,                  // 队列大小
-                    std::bind(img_cb, std::placeholders::_1)  // 使用 std::bind 包装回调
+                    camera_img_topics[i],
+                    200000,
+                    std::bind(img_cb, std::placeholders::_1)
             );
 
             sub_img_list.push_back(sub);
@@ -364,17 +402,6 @@ void LIVMapper::stateEstimationAndMapping() {
 }
 
 void LIVMapper::handleVIO() {
-    // 计算当前状态的欧拉角，用于日志输出
-    euler_cur = RotMtoEuler(_state.rot_end);
-    fout_pre << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " "
-             << (euler_cur.transpose() * 57.3) << " "
-             << _state.pos_end.transpose() << " "
-             << _state.vel_end.transpose() << " "
-             << _state.bias_g.transpose() << " "
-             << _state.bias_a.transpose() << " "
-             << V3D(_state.inv_expo_time, 0, 0).transpose() << std::endl;
-
-    // 检查是否有足够的点云数据
     if (pcl_w_wait_pub->empty() || (pcl_w_wait_pub == nullptr)) {
         std::cout << "[ VIO ] No point!!!" << std::endl;
         return;
@@ -382,16 +409,12 @@ void LIVMapper::handleVIO() {
 
     std::cout << "[ VIO ] Raw feature num: " << pcl_w_wait_pub->points.size() << std::endl;
 
-    // 根据时间差判断是否进行绘图（此处保持原有逻辑）
     if (fabs((LidarMeasures.last_lio_update_time - _first_lidar_time) - plot_time) < (frame_cnt / 2 * 0.1)) {
         vio_manager->plot_flag = true;
     } else {
         vio_manager->plot_flag = false;
     }
 
-    // 获取同步数据中的图像数据
-    // 这里假设多相机数据已存储在 LidarMeasures.measures.back().imgs 中
-    // 如果没有修改同步结构，也可以将单幅图像包装成 vector
     std::vector<cv::Mat> imgs = LidarMeasures.measures.back().imgs;
     if (imgs.empty()) {
         ROS_WARN("[ VIO ] No images available in the measurement group; skipping VIO update.");
@@ -399,11 +422,9 @@ void LIVMapper::handleVIO() {
     }
     ROS_INFO("[ VIO ] Processing frame with %zu image(s).", imgs.size());
 
-    // 调用 VIOManager 的 processFrame，传入多相机图像数据、当前地图点集合及其他参数
     vio_manager->processFrame(imgs, _pv_list, voxelmap_manager->voxel_map_,
                               LidarMeasures.last_lio_update_time - _first_lidar_time);
 
-    // 如果使能了 IMU 传播，则更新相关状态变量
     if (imu_prop_enable) {
         ekf_finish_once = true;
         latest_ekf_state = _state;
@@ -414,25 +435,11 @@ void LIVMapper::handleVIO() {
     publish_frame_world(pubLaserCloudFullRes, vio_manager);
     publish_img_rgb(pubImage, vio_manager);
 
-    // 输出当前状态到日志
-    euler_cur = RotMtoEuler(_state.rot_end);
-    fout_out << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " "
-             << (euler_cur.transpose() * 57.3) << " "
-             << _state.pos_end.transpose() << " "
-             << _state.vel_end.transpose() << " "
-             << _state.bias_g.transpose() << " "
-             << _state.bias_a.transpose() << " "
-             << V3D(_state.inv_expo_time, 0, 0).transpose() << " "
-             << feats_undistort->points.size() << std::endl;
+
 }
 
 void LIVMapper::handleLIO() {
     euler_cur = RotMtoEuler(_state.rot_end);
-    fout_pre << setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " "
-             << euler_cur.transpose() * 57.3 << " "
-             << _state.pos_end.transpose() << " " << _state.vel_end.transpose() << " " << _state.bias_g.transpose()
-             << " "
-             << _state.bias_a.transpose() << " " << V3D(_state.inv_expo_time, 0, 0).transpose() << endl;
 
     if (feats_undistort->empty() || (feats_undistort == nullptr)) {
         std::cout << "[ LIO ]: No point!!!" << std::endl;
@@ -510,18 +517,11 @@ void LIVMapper::handleLIO() {
               _state.cov.block<3, 3>(3, 3);
         voxelmap_manager->pv_list_[i].var = var;
     }
-    voxelmap_manager->UpdateVoxelMap(voxelmap_manager->pv_list_);
+    voxelmap_manager->UpdateVoxelMap(voxelmap_manager->pv_list_,LidarMeasures.last_lio_update_time);
     std::cout << "[ LIO ] Update Voxel Map" << std::endl;
     _pv_list = voxelmap_manager->pv_list_;
 
     double t4 = omp_get_wtime();
-
-    if (voxelmap_manager->config_setting_.map_sliding_en) {
-        if (voxelmap_manager->mapSliding()) {
-            // update_local_voxel_map();
-        }
-        // publish_local_voxelmap(local_voxel_clouds_publisher);
-    }
 
     PointCloudXYZI::Ptr laserCloudFullRes(dense_map_en ? feats_undistort : feats_down_body);
     int size = laserCloudFullRes->points.size();
@@ -564,13 +564,6 @@ void LIVMapper::handleLIO() {
     printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Average Total Time", aver_time_consu);
     printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
 
-    euler_cur = RotMtoEuler(_state.rot_end);
-    fout_out << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " "
-             << euler_cur.transpose() * 57.3 << " "
-             << _state.pos_end.transpose() << " " << _state.vel_end.transpose() << " " << _state.bias_g.transpose()
-             << " "
-             << _state.bias_a.transpose() << " " << V3D(_state.inv_expo_time, 0, 0).transpose() << " "
-             << feats_undistort->points.size() << std::endl;
 }
 
 void LIVMapper::savePCD() {
@@ -655,7 +648,7 @@ void LIVMapper::prop_imu_once(StatesGroup &imu_prop_state, const double dt, V3D 
 void LIVMapper::imu_prop_callback(const ros::TimerEvent &e) {
     if (p_imu->imu_need_init || !new_imu || !ekf_finish_once) { return; }
     mtx_buffer_imu_prop.lock();
-    new_imu = false; // 控制propagate频率和IMU频率一致
+    new_imu = false;
     if (imu_prop_enable && !prop_imu_buffer.empty()) {
         static double last_t_from_lidar_end_time = 0;
         if (state_update_flg) {
@@ -874,14 +867,13 @@ void LIVMapper::img_cbk(const sensor_msgs::ImageConstPtr &msg_in, int cam_id) {
 
     if (!img_en) return;
 
-    // 获取当前图像的时间戳并进行偏移
     double msg_header_time = msg_in->header.stamp.toSec() + img_time_offset;
 
     ROS_INFO("Camera %d: Received image with timestamp %.6f", cam_id, msg_header_time);
 
 
     if (last_timestamp_lidar < 0) {
-        return;  // 如果激光时间戳还未初始化，直接返回
+        return;
     }
 
     if (msg_header_time < last_timestamp_img) {
@@ -892,16 +884,13 @@ void LIVMapper::img_cbk(const sensor_msgs::ImageConstPtr &msg_in, int cam_id) {
     mtx_buffer.lock();
     double img_time_correct = msg_header_time;
 
-
-    // 获取当前图像
     cv::Mat img_cur = getImageFromMsg(msg_in);
     if (cam_id < 0 || cam_id >= img_buffers.size()) {
         ROS_ERROR("Invalid cam_id: %d. It should be between 0 and %d .", cam_id, img_buffers.size() - 1);
         return;
     }
-    // 将当前相机的图像和时间戳存入相应的缓存
-    img_buffers[cam_id].push_back(img_cur);  // 每个相机有自己的缓存
-    img_time_buffers[cam_id].push_back(img_time_correct);  // 每个相机有自己的时间戳缓存
+    img_buffers[cam_id].push_back(img_cur);
+    img_time_buffers[cam_id].push_back(img_time_correct);
     last_timestamp_img = img_time_correct;
     mtx_buffer.unlock();
     sig_buffer.notify_all();
@@ -909,11 +898,9 @@ void LIVMapper::img_cbk(const sensor_msgs::ImageConstPtr &msg_in, int cam_id) {
 
 bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
 {
-    // 1. 检查 LiDAR 数据是否存在
     if (lid_raw_data_buffer.empty() && lidar_en)
         return false;
 
-    // 2. 检查多相机图像数据是否齐全（每个相机必须都有数据）
     if (img_en) {
         for (int i = 0; i < num_of_cameras; i++) {
             if (img_buffers[i].empty())
@@ -921,11 +908,9 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
         }
     }
 
-    // 3. 检查 IMU 数据是否存在
     if (imu_buffer.empty() && imu_en)
         return false;
 
-    // 4. 根据 SLAM 模式分支处理
     switch (slam_mode_) {
         case ONLY_LIO:
         {
@@ -975,16 +960,13 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
         {
             EKF_STATE last_lio_vio_flg = meas.lio_vio_flg;
             switch (last_lio_vio_flg) {
-                // 在 WAIT 或 VIO 状态下，先进行 LIO 更新
                 case WAIT:
                 case VIO:
                 {
-                    // 验证多相机时间戳一致性（硬件同步）
-                    const double time_tolerance = 0.001; // 允许1毫秒误差
+                    const double time_tolerance = 0.001;
                     double ref_timestamp = img_time_buffers[0].front();
                     bool timestamps_consistent = true;
 
-                    // 检查所有相机时间戳是否一致
                     for (int i = 1; i < num_of_cameras; i++) {
                         double time_diff = std::abs(img_time_buffers[i].front() - ref_timestamp);
                         if (time_diff > time_tolerance) {
@@ -995,11 +977,9 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                         }
                     }
 
-                    // 如果时间戳不一致，丢弃所有相机中时间最早的一帧
                     if (!timestamps_consistent) {
                         mtx_buffer.lock();
 
-                        // 找出时间最早的相机
                         int earliest_cam = 0;
                         for (int i = 1; i < num_of_cameras; i++) {
                             if (img_time_buffers[i].front() < img_time_buffers[earliest_cam].front()) {
@@ -1007,7 +987,6 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                             }
                         }
 
-                        // 只丢弃时间最早的那个相机的一帧
                         img_buffers[earliest_cam].pop_front();
                         img_time_buffers[earliest_cam].pop_front();
 
@@ -1016,19 +995,15 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                         return false;
                     }
 
-                    // 初始化last_lio_update_time
                     if (meas.last_lio_update_time < 0.0)
                         meas.last_lio_update_time = lid_header_time_buffer.front();
 
-                    // 计算以相机曝光中点为参考的同步时间
                     double img_capture_time = ref_timestamp + exposure_time_init;
 
-                    // 获取最新的LiDAR和IMU时间，用于判断数据充足性
                     double lid_newest_time = lid_header_time_buffer.back() +
                                              lid_raw_data_buffer.back()->points.back().curvature / 1000.0;
                     double imu_newest_time = imu_en ? imu_buffer.back()->header.stamp.toSec() : img_capture_time + 1.0;
 
-                    // 如果新图像时间低于上一次同步时间，则认为数据不新，丢弃所有相机当前帧
                     if (img_capture_time < meas.last_lio_update_time + 0.00001) {
                         mtx_buffer.lock();
                         for (int i = 0; i < num_of_cameras; i++) {
@@ -1041,7 +1016,6 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                         return false;
                     }
 
-                    // 检查数据充足性：如果图像时间超出了最新LiDAR或IMU时间，等待更多数据
                     if (img_capture_time > lid_newest_time || img_capture_time > imu_newest_time) {
                         return false;
                     }
@@ -1050,7 +1024,6 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                     m.imu.clear();
                     m.lio_time = img_capture_time;
 
-                    // 收集IMU数据
                     if (imu_en) {
                         mtx_buffer.lock();
                         while (!imu_buffer.empty()) {
@@ -1064,7 +1037,6 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                         mtx_buffer.unlock();
                     }
 
-                    // 处理 LiDAR 数据：参考单相机版本的点云分割策略
                     *(meas.pcl_proc_cur) = *(meas.pcl_proc_next);
                     PointCloudXYZI().swap(*meas.pcl_proc_next);
 
@@ -1073,7 +1045,6 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                     meas.pcl_proc_cur->reserve(max_size);
                     meas.pcl_proc_next->reserve(max_size);
 
-                    // 分割点云：将点云按时间分为当前帧和下一帧
                     while (!lid_raw_data_buffer.empty()) {
                         if (lid_header_time_buffer.front() > img_capture_time)
                             break;
@@ -1085,12 +1056,10 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                         for (size_t i = 0; i < pcl.size(); i++) {
                             auto pt = pcl[i];
                             if (pcl[i].curvature < max_offs_time_ms) {
-                                // 属于当前帧的点
                                 pt.curvature += (frame_header_time - meas.last_lio_update_time) * 1000.0f;
                                 meas.pcl_proc_cur->points.push_back(pt);
                             }
                             else {
-                                // 属于下一帧的点
                                 pt.curvature += (frame_header_time - m.lio_time) * 1000.0f;
                                 meas.pcl_proc_next->points.push_back(pt);
                             }
@@ -1099,7 +1068,6 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                         lid_header_time_buffer.pop_front();
                     }
 
-                    // 将所有相机当前帧图像存入 MeasureGroup
                     m.imgs.resize(num_of_cameras);
                     for (int i = 0; i < num_of_cameras; i++) {
                         m.imgs[i] = img_buffers[i].front();
@@ -1115,15 +1083,12 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                     return true;
                 }
 
-                    // 在 LIO 状态下，执行 VIO 更新，消费掉各相机当前帧图像
                 case LIO:
                 {
-                    // 验证多相机时间戳一致性
-                    const double time_tolerance = 0.001; // 允许1毫秒误差
+                    const double time_tolerance = 0.001;
                     double ref_timestamp = img_time_buffers[0].front();
                     bool timestamps_consistent = true;
 
-                    // 检查所有相机时间戳是否一致
                     for (int i = 1; i < num_of_cameras; i++) {
                         double time_diff = std::abs(img_time_buffers[i].front() - ref_timestamp);
                         if (time_diff > time_tolerance) {
@@ -1134,9 +1099,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                         }
                     }
 
-                    // 如果时间戳不一致，丢弃所有相机中时间最早的一帧
                     if (!timestamps_consistent) {
-                        // 找出时间最早的相机
                         int earliest_cam = 0;
                         for (int i = 1; i < num_of_cameras; i++) {
                             if (img_time_buffers[i].front() < img_time_buffers[earliest_cam].front()) {
@@ -1144,7 +1107,6 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                             }
                         }
 
-                        // 只丢弃时间最早的那个相机的一帧
                         ROS_WARN("VIO stage: Dropping earliest frame from camera %d (t=%.6f)",
                                  earliest_cam, img_time_buffers[earliest_cam].front());
                         img_buffers[earliest_cam].pop_front();
@@ -1157,13 +1119,12 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
                     double img_capture_time = ref_timestamp + exposure_time_init;
                     meas.lio_vio_flg = VIO;
 
-                    // 若进入 VIO 更新则清除之前的 MeasureGroup
                     meas.measures.clear();
 
                     MeasureGroup m;
                     m.imgs.resize(num_of_cameras);
-                    m.vio_time = img_capture_time;  // VIO时间为图像时间
-                    m.lio_time = meas.last_lio_update_time;  // LIO时间为上次LIO更新时间
+                    m.vio_time = img_capture_time;
+                    m.lio_time = meas.last_lio_update_time;
 
                     mtx_buffer.lock();
                     for (int i = 0; i < num_of_cameras; i++) {

@@ -42,7 +42,8 @@ enum LID_TYPE
   OUST64 = 3,
   L515 = 4,
   XT32 = 5,
-  PANDAR128 = 6
+  PANDAR128 = 6,
+  ROBOSENSE = 7
 };
 enum SLAM_MODE
 {
@@ -63,11 +64,22 @@ struct MeasureGroup
   double lio_time;
   deque<sensor_msgs::Imu::ConstPtr> imu;
   std::vector<cv::Mat> imgs;
+
+  // GNSS measurement synchronized with this measurement group
+  bool has_gnss;
+  Eigen::Vector3d gnss_enu_position;
+  Eigen::Matrix3d gnss_covariance;
+  double gnss_timestamp;
+
   MeasureGroup()
   {
     vio_time = 0.0;
     lio_time = 0.0;
     imgs.clear();
+    has_gnss = false;
+    gnss_enu_position.setZero();
+    gnss_covariance.setIdentity();
+    gnss_timestamp = 0.0;
   };
 };
 
@@ -132,9 +144,9 @@ struct StatesGroup
     this->bias_g = V3D::Zero();
     this->bias_a = V3D::Zero();
     this->gravity = V3D::Zero();
-    this->inv_expo_time = 1.0;
+    this->inv_expo_time_per_cam.clear();  // 多相机独立曝光（单相机时size=1）
     this->cov = MD(DIM_STATE, DIM_STATE)::Identity() * INIT_COV;
-    this->cov(6, 6) = 0.00001;
+    this->cov(6, 6) = 0.00001;  // 原曝光位置保留协方差（兼容IMU processing）
     this->cov.block<9, 9>(10, 10) = MD(9, 9)::Identity() * 0.00001;
   };
 
@@ -146,7 +158,7 @@ struct StatesGroup
     this->bias_g = b.bias_g;
     this->bias_a = b.bias_a;
     this->gravity = b.gravity;
-    this->inv_expo_time = b.inv_expo_time;
+    this->inv_expo_time_per_cam = b.inv_expo_time_per_cam;
     this->cov = b.cov;
   };
 
@@ -158,7 +170,7 @@ struct StatesGroup
     this->bias_g = b.bias_g;
     this->bias_a = b.bias_a;
     this->gravity = b.gravity;
-    this->inv_expo_time = b.inv_expo_time;
+    this->inv_expo_time_per_cam = b.inv_expo_time_per_cam;
     this->cov = b.cov;
     return *this;
   };
@@ -168,7 +180,8 @@ struct StatesGroup
     StatesGroup a;
     a.rot_end = this->rot_end * Exp(state_add(0, 0), state_add(1, 0), state_add(2, 0));
     a.pos_end = this->pos_end + state_add.block<3, 1>(3, 0);
-    a.inv_expo_time = this->inv_expo_time + state_add(6, 0);
+    // 曝光时间不在ESKF状态向量中，单独更新
+    a.inv_expo_time_per_cam = this->inv_expo_time_per_cam;
     a.vel_end = this->vel_end + state_add.block<3, 1>(7, 0);
     a.bias_g = this->bias_g + state_add.block<3, 1>(10, 0);
     a.bias_a = this->bias_a + state_add.block<3, 1>(13, 0);
@@ -182,7 +195,7 @@ struct StatesGroup
   {
     this->rot_end = this->rot_end * Exp(state_add(0, 0), state_add(1, 0), state_add(2, 0));
     this->pos_end += state_add.block<3, 1>(3, 0);
-    this->inv_expo_time += state_add(6, 0);
+    // 曝光时间不在ESKF状态向量中，单独更新
     this->vel_end += state_add.block<3, 1>(7, 0);
     this->bias_g += state_add.block<3, 1>(10, 0);
     this->bias_a += state_add.block<3, 1>(13, 0);
@@ -196,7 +209,7 @@ struct StatesGroup
     M3D rotd(b.rot_end.transpose() * this->rot_end);
     a.block<3, 1>(0, 0) = Log(rotd);
     a.block<3, 1>(3, 0) = this->pos_end - b.pos_end;
-    a(6, 0) = this->inv_expo_time - b.inv_expo_time;
+    a(6, 0) = 0.0;  // 曝光不在状态向量，占位为0
     a.block<3, 1>(7, 0) = this->vel_end - b.vel_end;
     a.block<3, 1>(10, 0) = this->bias_g - b.bias_g;
     a.block<3, 1>(13, 0) = this->bias_a - b.bias_a;
@@ -214,7 +227,7 @@ struct StatesGroup
   M3D rot_end;                              // the estimated attitude (rotation matrix) at the end lidar point
   V3D pos_end;                              // the estimated position at the end lidar point (world frame)
   V3D vel_end;                              // the estimated velocity at the end lidar point (world frame)
-  double inv_expo_time;                     // the estimated inverse exposure time (no scale)
+  std::vector<double> inv_expo_time_per_cam;  // 每个相机的逆曝光时间（单相机时size=1）
   V3D bias_g;                               // gyroscope bias
   V3D bias_a;                               // accelerator bias
   V3D gravity;                              // the estimated gravity acceleration
@@ -240,4 +253,11 @@ auto set_pose6d(const double t, const Matrix<T, 3, 1> &a, const Matrix<T, 3, 1> 
   return move(rot_kp);
 }
 
+
+struct PoseHistory {
+    double timestamp;
+    Eigen::Matrix3d rotation;
+    Eigen::Vector3d position;
+    bool was_corrected;
+};
 #endif

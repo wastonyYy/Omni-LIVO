@@ -10,7 +10,7 @@
 	</node>
 	
 	<group if="$(arg rviz)">
-		<node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find fast_livo)/rviz_cfg/fast_livo2.rviz" />
+		<node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find fast_livo)/rviz_cfg/mid360.rviz" />
 	</group>
 
 launch-prefix="gdb -ex run --args"

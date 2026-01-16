@@ -1,14 +1,31 @@
-/* 
-This file is part of FAST-LIVO2: Fast, Direct LiDAR-Inertial-Visual Odometry.
-
-Developer: Chunran Zheng <zhengcr@connect.hku.hk>
-
-For commercial use, please contact me at <zhengcr@connect.hku.hk> or
-Prof. Fu Zhang at <fuzhang@hku.hk>.
-
-This file is subject to the terms and conditions outlined in the 'LICENSE' file,
-which is included as part of this source code package.
-*/
+/**
+ * @file LIVMapper.h
+ * @brief LiDAR-Inertial-Visual Mapper module for Omni-LIVO
+ *
+ * @copyright Copyright (c) 2026 Hangzhou Institute for Advanced Study,
+ *            University of Chinese Academy of Sciences
+ *
+ * @par Project: Omni-LIVO
+ * Omni-LIVO: Robust RGB-Colored Multi-Camera Visual-Inertial-LiDAR Odometry
+ * via Photometric Migration and ESIKF Fusion
+ *
+ * This work is based on FAST-LIVO2:
+ * C. Zheng, W. Xu, Q. Guo, and F. Zhang, "FAST-LIVO2: Fast, direct LiDAR-inertial-visual
+ * odometry," IEEE Trans. Robot., vol. 40, pp. 1529-1546, 2024.
+ *
+ * @author Yinong Cao (cyn_688@163.com), Chenyang Zhang, Xin He*, Yuwei Chen, Chengyu Pu,
+ *         Bingtao Wang, Kaile Wu, Shouzheng Zhu, Fei Han, Shijie Liu, Chunlai Li, Jianyu Wang
+ * @author *Corresponding author: Xin He (xinhe@ucas.ac.cn)
+ *
+ * @par Repository
+ * https://github.com/elon876/Omni-LIVO
+ *
+ * @par Citation
+ * If you use this code in your research, please cite our paper:
+ * Y. Cao et al., "Omni-LIVO: Robust RGB-Colored Multi-Camera Visual-Inertial-LiDAR
+ * Odometry via Photometric Migration and ESIKF Fusion," IEEE Robotics and Automation
+ * Letters, 2026.
+ */
 
 #ifndef LIV_MAPPER_H
 #define LIV_MAPPER_H
@@ -161,10 +178,20 @@ public:
     vector<double> extrinT;
     vector<double> extrinR;
 
-    std::vector<std::vector<double>> camera_extrin_Rs;  // 多台相机的外参 R
-    std::vector<std::vector<double>> camera_extrin_Ts;  // 多台相机的外参 T
-    int num_of_cameras = 0;                             // 相机数量
+    std::vector<std::vector<double>> camera_extrin_Rs;
+    std::vector<std::vector<double>> camera_extrin_Ts;
+    int num_of_cameras = 0;
 
+    bool vio_dynamic_cov_enabled_;
+    int vio_dynamic_cov_warmup_frames = 200;
+    double vio_warmup_cov_scale = 500.0;
+    int vio_ideal_total_points = 150;
+    double vio_max_cov_scale = 2000.0;
+    double vio_min_cov_scale = 10.0;
+    double vio_dynamic_cov_error_max = 50.0;
+    bool raycast_en = false;
+    int max_total_points = 300;
+    bool enable_cross_camera_tracking = false;
 
     double IMG_POINT_COV;
 
@@ -175,7 +202,8 @@ public:
     PointCloudXYZI::Ptr pcl_w_wait_pub;
     PointCloudXYZI::Ptr pcl_wait_pub;
     PointCloudXYZRGB::Ptr pcl_wait_save;
-
+    PointCloudXYZRGB::Ptr latest_colored_cloud_;  // Store the latest colored point cloud
+    bool save_ply_en = false;
     ofstream fout_pre, fout_out, fout_pcd_pos, fout_points;
 
     pcl::VoxelGrid<PointType> downSizeFilterSurf;
@@ -201,6 +229,10 @@ public:
     ros::Subscriber sub_pcl;
     ros::Subscriber sub_imu;
     std::vector<ros::Subscriber> sub_img_list;
+    std::vector<image_transport::Subscriber> it_sub_img_list;  // Image transport subscribers for each camera
+    std::vector<ros::Subscriber> sub_compressed_img_list;
+    void compressed_img_cbk(const sensor_msgs::CompressedImageConstPtr &msg_in, int cam_id);
+
     ros::Publisher pubLaserCloudFullRes;
     ros::Publisher pubNormal;
     ros::Publisher pubSubVisualMap;
@@ -217,9 +249,16 @@ public:
 
     int frame_num = 0;
     double aver_time_consu = 0;
-    double aver_time_icp = 0;
-    double aver_time_map_inre = 0;
     bool colmap_output_en = false;
+
+// Method to get a historical point cloud by timestamp
+    PointCloudXYZI::Ptr getHistoricalPointCloud(double timestamp);
+    void publish_cloud_body(const ros::Publisher &pubLaserCloudBody);
+    ros::Publisher pubLaserCloudBody;
+    bool pub_body_cloud_en = false;
+
+private:
+    void finalizePointCloudFile();
 };
 
 #endif

@@ -1,14 +1,3 @@
-/* 
-This file is part of FAST-LIVO2: Fast, Direct LiDAR-Inertial-Visual Odometry.
-
-Developer: Chunran Zheng <zhengcr@connect.hku.hk>
-
-For commercial use, please contact me at <zhengcr@connect.hku.hk> or
-Prof. Fu Zhang at <fuzhang@hku.hk>.
-
-This file is subject to the terms and conditions outlined in the 'LICENSE' file,
-which is included as part of this source code package.
-*/
 
 #include "visual_point.h"
 #include "feature.h"
@@ -17,8 +6,10 @@ which is included as part of this source code package.
 
 VisualPoint::VisualPoint(const Vector3d &pos)
     : pos_(pos), previous_normal_(Vector3d::Zero()), normal_(Vector3d::Zero()),
-      is_converged_(false), is_normal_initialized_(false), has_ref_patch_(false)
+      is_converged_(false), is_normal_initialized_(false), has_ref_patch_(false),
+      cache_frame_id_(-1)  // 【性能优化】初始化缓存帧ID
 {
+    visible_cameras_cache_.reset();  // 【性能优化】清空可见相机缓存
 }
 
 VisualPoint::~VisualPoint() 
@@ -34,6 +25,25 @@ VisualPoint::~VisualPoint()
 void VisualPoint::addFrameRef(Feature *ftr)
 {
   obs_.push_front(ftr);
+
+  // 【内存优化】限制观测列表大小，删除最旧的观测
+  if (obs_.size() > MAX_OBS) {
+    Feature *old_ftr = obs_.back();
+    // 只删除非ref_patch的观测，避免误删reference patch
+    if (old_ftr != ref_patch) {
+      delete old_ftr;
+      obs_.pop_back();
+    } else {
+      // 如果最旧的是ref_patch，删除倒数第二个
+      auto it = obs_.end();
+      --it;  // 指向最后一个
+      if (it != obs_.begin()) {
+        --it;  // 指向倒数第二个
+        delete (*it);
+        obs_.erase(it);
+      }
+    }
+  }
 }
 
 void VisualPoint::deleteFeatureRef(Feature *ftr)
@@ -96,6 +106,12 @@ bool VisualPoint::getCloseViewObs(const Vector3d &framepos, Feature *&ftr, const
 
 void VisualPoint::findMinScoreFeature(const Vector3d &framepos, Feature *&ftr) const
 {
+  if (obs_.empty())
+  {
+    ftr = nullptr;
+    return;
+  }
+
   auto min_it = obs_.begin();
   float min_score = std::numeric_limits<float>::max();
 

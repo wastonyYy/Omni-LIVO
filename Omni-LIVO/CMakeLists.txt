@@ -32,7 +32,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|aarch64|ARM|AARCH64)")
 else()
   # x86-64 (Intel/AMD) optimizations
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -mtune=native -funroll-loops") #-flto
-  message(STATUS "Using general x86 optimizations: -O3 -march=native -mtune=native -funroll-loops") 
+  message(STATUS "Using general x86 optimizations: -O3 -march=native -mtune=native -funroll-loops")
   add_definitions(-DX86_ARCH)
 endif()
 
@@ -75,25 +75,32 @@ else()
   message(STATUS "mimalloc not found, proceeding without it")
 endif()
 
+# OpenCV extras for BRIEF descriptor
+find_package(OpenCV REQUIRED
+        COMPONENTS
+        core
+        highgui
+        features2d
+)
 # Find catkin and required dependencies
 find_package(catkin REQUIRED COMPONENTS
-  geometry_msgs
-  nav_msgs
-  sensor_msgs
-  roscpp
-  rospy
-  std_msgs
-  pcl_ros
-  tf
-  livox_ros_driver
-  message_generation
-  eigen_conversions
-  vikit_common
-  vikit_ros
-  cv_bridge
-  image_transport
+        geometry_msgs
+        nav_msgs
+        sensor_msgs
+        roscpp
+        rospy
+        std_msgs
+        pcl_ros
+        tf
+        livox_ros_driver
+        message_generation
+        eigen_conversions
+        vikit_common
+        vikit_ros
+        cv_bridge
+        image_transport
 )
-
+#find_package(teaserpp REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
@@ -101,27 +108,24 @@ find_package(OpenCV REQUIRED)
 # Find Sophus and manually link to libSophus.so
 FIND_PACKAGE(Sophus REQUIRED)
 set(Sophus_LIBRARIES "/usr/local/lib/libSophus.so")
-
-
 # Make sure Boost is found
 find_package(Boost REQUIRED COMPONENTS thread)
 
 
-
 # Include directories for dependencies
 include_directories(
-  ${catkin_INCLUDE_DIRS}
-  ${EIGEN3_INCLUDE_DIR}
-  ${PCL_INCLUDE_DIRS}
-  ${OpenCV_INCLUDE_DIRS}
-  ${Sophus_INCLUDE_DIRS}
-  include
+        ${catkin_INCLUDE_DIRS}
+        ${EIGEN3_INCLUDE_DIR}
+        ${PCL_INCLUDE_DIRS}
+        ${OpenCV_INCLUDE_DIRS}
+        ${Sophus_INCLUDE_DIRS}
+        include
 )
 
 # Define the catkin package
 catkin_package(
-  CATKIN_DEPENDS geometry_msgs nav_msgs roscpp rospy std_msgs message_runtime cv_bridge vikit_common vikit_ros image_transport
-  DEPENDS EIGEN3 PCL OpenCV Sophus
+        CATKIN_DEPENDS geometry_msgs nav_msgs roscpp rospy std_msgs message_runtime cv_bridge vikit_common vikit_ros image_transport
+        DEPENDS EIGEN3 PCL OpenCV Sophus
 )
 
 # Add libraries
@@ -130,27 +134,26 @@ add_library(lio src/voxel_map.cpp)
 add_library(pre src/preprocess.cpp)
 add_library(imu_proc src/IMU_Processing.cpp)
 add_library(laser_mapping src/LIVMapper.cpp)
-
 # Add the main executable
 add_executable(fastlivo_mapping src/main.cpp
 )
 
+
 # Link libraries to the executable
 target_link_libraries(fastlivo_mapping
-  laser_mapping
-  vio
-  lio
-  pre
-  imu_proc
-  ${catkin_LIBRARIES}
-  ${PCL_LIBRARIES}
-  ${OpenCV_LIBRARIES}
-  ${Sophus_LIBRARIES}  # Ensure linking to libSophus.so
-  ${Boost_LIBRARIES}
+        laser_mapping
+        vio
+        lio
+        pre
+        imu_proc
+        ${catkin_LIBRARIES}
+        ${PCL_LIBRARIES}
+        ${OpenCV_LIBRARIES}
+        ${Sophus_LIBRARIES}  # Ensure linking to libSophus.so
+        ${Boost_LIBRARIES}
 )
 
 # Link mimalloc if found
 if(mimalloc_FOUND)
   target_link_libraries(fastlivo_mapping mimalloc)
 endif()
-

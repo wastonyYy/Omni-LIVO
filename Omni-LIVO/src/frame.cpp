@@ -16,13 +16,12 @@ which is included as part of this source code package.
 #include "visual_point.h"
 #include <stdexcept>
 #include <vikit/math_utils.h>
-#include <vikit/performance_monitor.h>
 #include <vikit/vision.h>
 
 int Frame::frame_counter_ = 0;
 
-Frame::Frame(const std::vector<vk::AbstractCamera *> &cams, std::vector<cv::Mat> &imgs)
-        : id_(frame_counter_++), cams_(cams), T_f_w_(cams.size(), SE3())
+Frame::Frame(const std::vector<vk::AbstractCamera *> &cams, std::vector<cv::Mat> &imgs, double timestamp)
+        : id_(frame_counter_++), cams_(cams), T_f_w_(cams.size(), SE3()),timestamp_(timestamp)
 {
     initFrame(imgs);
 }
@@ -51,7 +50,16 @@ void Frame::initFrame( std::vector<cv::Mat> &imgs)
             throw std::runtime_error("Frame: one of the provided images is not grayscale");
         }
     }
-    imgs_ = imgs;
+
+    // 【内存优化】使用智能指针共享图像数据，避免重复拷贝
+    imgs_shared_.resize(imgs.size());
+    imgs_.resize(imgs.size());
+    for (size_t i = 0; i < imgs.size(); ++i) {
+        // 创建shared_ptr包装图像（使用clone确保数据独立）
+        imgs_shared_[i] = std::make_shared<cv::Mat>(imgs[i].clone());
+        // imgs_保留引用，避免破坏现有代码（不拷贝数据，只是Mat header）
+        imgs_[i] = *imgs_shared_[i];
+    }
 }
 /// Utility functions for the Frame class
 namespace frame_utils

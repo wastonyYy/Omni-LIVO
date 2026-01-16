@@ -12,7 +12,7 @@ extrin_calib:
                 0, 1, 0,
                 0, 0, 1]
 
-  # 多相机外参统一放这里 数量必须对应 相机到雷达的变换
+  # Multi-camera extrinsics: camera-to-LiDAR transformation
   cameras:
     - cam_id: 0
       img_topic: "/left_camera/image"
@@ -32,15 +32,16 @@ time_offset:
 
 preprocess:
   point_filter_num: 1
-  filter_size_surf: 0.1
+  filter_size_surf: 0.2
   lidar_type: 1
   scan_line: 6
-  blind: 0.8
+  blind: 0.5
+
 
 vio:
   max_iterations: 5
-  outlier_threshold: 1000
-  img_point_cov: 100
+  outlier_threshold: 100
+  img_point_cov: 1000
   patch_size: 8
   patch_pyrimid_level: 4
   normal_en: true
@@ -51,10 +52,10 @@ vio:
 imu:
   imu_en: true
   imu_int_frame: 30
-  acc_cov: 0.5
-  gyr_cov: 0.3
-  b_acc_cov: 0.0001
-  b_gyr_cov: 0.0001
+  acc_cov: 0.5 # 0.2
+  gyr_cov: 0.3 # 0.5
+  b_acc_cov: 0.0001 # 0.1
+  b_gyr_cov: 0.0001 # 0.1
 
 lio:
   max_iterations: 5
@@ -63,14 +64,8 @@ lio:
   min_eigen_value: 0.0025
   voxel_size: 0.5
   max_layer: 2
-  max_points_num: 50
+  max_points_num: 100
   layer_init_num: [5, 5, 5, 5, 5]
-
-
-local_map:
-  map_sliding_en: falses
-  half_map_size: 100
-  sliding_thresh: 8
 
 uav:
   imu_rate_odom: false
@@ -78,15 +73,15 @@ uav:
 
 publish:
   dense_map_en: true
-  pub_effect_point_en: true
-  pub_body_cloud_en: true
+  pub_effect_point_en: false
+  pub_body_cloud_en: false
   pub_plane_en: false
   pub_scan_num: 1
   blind_rgb_points: 0.0
 
 evo:
-  seq_name: "CBD_Building_01"
-  pose_output_en: false
+  seq_name: "frame_pose"
+  pose_output_en: true
 
 pcd_save:
   pcd_save_en: false

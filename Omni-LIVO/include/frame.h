@@ -5,12 +5,18 @@
 #include <vikit/abstract_camera.h>
 #include <vector>
 #include <list>
+#include <opencv2/opencv.hpp>
+#include <opencv2/core/core.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <sophus/se3.h>
 
 class VisualPoint;
 struct Feature;
 
 typedef std::list<Feature *> Features;
 typedef std::vector<cv::Mat> ImgPyr;
+using namespace Sophus;
 
 class Frame : boost::noncopyable
 {
@@ -22,10 +28,18 @@ public:
     std::vector<vk::AbstractCamera *> cams_; // Multiple cameras
     std::vector<SE3> T_f_w_;                 // Transform (f)rame from (w)orld for each camera
     std::vector<SE3> T_f_w_prior_;          //!< Transform (f)rame from (w)orld provided by the IMU prior.
-    std::vector<cv::Mat> imgs_;
-    Features fts_;
 
-    Frame(const std::vector<vk::AbstractCamera *> &cams, std::vector<cv::Mat> &imgs);
+    // 【内存优化】使用智能指针共享图像数据，避免重复拷贝
+    std::vector<std::shared_ptr<cv::Mat>> imgs_shared_;  // Shared ownership of images
+    std::vector<cv::Mat> imgs_;              // Keep for backward compatibility (will reference shared data)
+
+    Features fts_;
+    double timestamp_;
+
+
+
+
+    Frame(const std::vector<vk::AbstractCamera *> &cams, std::vector<cv::Mat> &imgs, double timestamp);
     ~Frame();
 
     void initFrame( std::vector<cv::Mat> &imgs);
@@ -56,7 +70,7 @@ public:
     }
 };
 
-typedef std::unique_ptr<Frame> FramePtr;
+typedef std::shared_ptr<Frame> FramePtr;
 
 namespace frame_utils
 {
